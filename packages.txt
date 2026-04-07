@@ -6,3 +6,4 @@ libasound2
 libpangocairo-1.0-0
 libxss1
 libxtst6
+libxshmfence1
