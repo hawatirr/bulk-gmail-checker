@@ -7,151 +7,133 @@ import pandas as pd
 import random
 from playwright.async_api import async_playwright
 
-# --- 1. BOOTSTRAP ENGINE (Anti-Error Version) ---
+# --- 1. SETUP ENGINE ---
 def setup_browser():
-    """Menginstal chromium tanpa menggunakan sudo/install-deps"""
     try:
-        # Mencoba install chromium saja (user-level)
         subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
         return True
     except:
         return False
 
 if 'engine_ready' not in st.session_state:
-    with st.spinner("🛠️ Menginisialisasi Mesin Antarmuka..."):
+    with st.spinner("🛠️ Memanaskan Mesin..."):
         setup_browser()
         st.session_state.engine_ready = True
 
-# --- 2. CONFIG & STYLING ---
-st.set_page_config(page_title="Gmail Bulk Pro", layout="wide", page_icon="🛡️")
-
+# --- 2. CONFIG ---
+st.set_page_config(page_title="Gmail Bulk Turbo", layout="wide")
 st.markdown("""
     <style>
-    [data-testid="stMetricValue"] { font-size: 28px; font-weight: bold; }
-    .stProgress .st-bo { background-color: #4CAF50; }
-    .status-live { color: #28a745; font-weight: bold; }
-    .status-verif { color: #ffc107; font-weight: bold; }
-    .status-disabled { color: #dc3545; font-weight: bold; }
+    .reportview-container .main { background-color: #f0f2f6; }
+    div[data-testid="stMetricValue"] { font-size: 24px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. SESSION STATE ---
 if 'results' not in st.session_state:
     st.session_state.results = []
 if 'stats' not in st.session_state:
-    st.session_state.stats = {"ALL": 0, "Live": 0, "Verif": 0, "Disabled": 0, "Unregistered": 0, "Bad": 0}
+    st.session_state.stats = {"ALL": 0, "Live": 0, "Verif": 0, "Disabled": 0, "Unregistered": 0}
 
-# --- 4. HEADER & DASHBOARD ---
-st.title("🛡️ Gmail Bulk Pro Checker")
-st.info("Status: Engine Ready ✅ | Anti-Detection: Active 🛡️")
-
-m1, m2, m3, m4, m5, m6 = st.columns(6)
-m1.metric("TOTAL", st.session_state.stats["ALL"])
-m2.metric("LIVE", st.session_state.stats["Live"], delta="Stable", delta_color="normal")
-m3.metric("VERIF", st.session_state.stats["Verif"], delta="OTP Required", delta_color="off")
-m4.metric("DISABLED", st.session_state.stats["Disabled"], delta="Banned", delta_color="inverse")
-m5.metric("UNREG", st.session_state.stats["Unregistered"], delta="Not Found", delta_color="off")
-m6.metric("BAD", st.session_state.stats["Bad"], delta="Login Fail", delta_color="inverse")
-
-# --- 5. LOGIKA CHECKER (ADVANCED) ---
-async def deep_check_email(email):
-    async with async_playwright() as p:
-        # Gunakan User-Agent acak agar tidak terbaca bot
-        user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
-        ]
-        
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent=random.choice(user_agents))
+# --- 3. LOGIKA CHECKER (AKURAT & PARALEL) ---
+async def check_single_email(semaphore, browser, email):
+    async with semaphore: # Batasi jumlah pengecekan simultan
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            locale="en-US" # Paksa bahasa Inggris agar deteksi kata kunci akurat
+        )
         page = await context.new_page()
+        status = "Error"
         
         try:
-            # Pergi ke halaman recovery (Metode paling aman tanpa password)
-            await page.goto('https://accounts.google.com/signin/v2/recoveryidentifier', wait_until="networkidle")
-            
-            # Simulasi mengetik seperti manusia
-            await page.type('input[type="email"]', email, delay=random.randint(50, 150))
+            # Bypass deteksi bot dengan navigasi natural
+            await page.goto('https://accounts.google.com/signin/v2/recoveryidentifier', timeout=60000)
+            await page.fill('input[type="email"]', email)
             await page.keyboard.press("Enter")
             
-            # Tunggu respon dinamis
-            await asyncio.sleep(random.uniform(2.5, 4.0)) 
+            # Tunggu transisi halaman atau munculnya pesan error
+            await asyncio.sleep(3.5) 
             
             content = await page.content()
-            current_url = page.url
+            url = page.url
 
-            # LOGIKA PENENTU STATUS (Berdasarkan elemen UI Google)
+            # LOGIKA FILTER LEBIH DETAIL (BERDASARKAN ELEMEN & URL)
             if "Couldn't find" in content or "Gagal menemukan" in content:
-                return "Unregistered"
-            elif "disabled" in content or "dinonaktifkan" in content or "melanggar" in content:
-                return "Disabled"
-            elif "verification" in content or "verifikasi" in content or "challenge" in current_url:
-                return "Verif"
-            elif "re-enter" in content or "password" in content.lower():
-                # Jika dia minta password, artinya email itu LIVE dan AKTIF
-                return "Live"
+                status = "Unregistered"
+            elif "denied" in url or "disabled" in url or "Account disabled" in content:
+                status = "Disabled"
+            elif "challenge" in url or "confirm" in url or "verification" in content.lower():
+                status = "Verif"
+            elif "v2/recoverypassword" in url or "Enter your password" in content or "Enter the last password" in content:
+                # Jika dia lanjut ke halaman password, berarti akun SEHAT/LIVE
+                status = "Live"
             else:
-                # Jika tertahan di halaman aneh atau minta captcha terus menerus
-                return "Bad"
-                
+                # Jika Google minta Captcha karena terlalu cepat
+                status = "Rate Limited/Bad"
+
         except Exception:
-            return "Error/Timeout"
+            status = "Timeout"
         finally:
-            await browser.close()
+            await context.close()
+            return {"Email": email, "Status": status}
 
-# --- 6. INPUT & CONTROL ---
-email_input = st.text_area("Masukkan Email (Satu baris satu email):", height=200)
+# --- 4. DASHBOARD UI ---
+st.title("🛡️ Gmail Bulk Turbo Checker")
 
-c1, c2 = st.columns([1, 5])
-btn_start = c1.button("🚀 EXECUTE", use_container_width=True)
-btn_clear = c2.button("🧹 CLEAR DATA", use_container_width=False)
+# Baris Statistik (Real-time update)
+stats_container = st.container()
+with stats_container:
+    m1, m2, m3, m4, m5 = st.columns(5)
+    st_all = m1.metric("ALL", st.session_state.stats["ALL"])
+    st_live = m2.metric("LIVE", st.session_state.stats["Live"])
+    st_verif = m3.metric("VERIF", st.session_state.stats["Verif"])
+    st_dis = m4.metric("DISABLED", st.session_state.stats["Disabled"])
+    st_unreg = m5.metric("UNREG", st.session_state.stats["Unregistered"])
 
-if btn_clear:
-    st.session_state.results = []
-    st.session_state.stats = {k: 0 for k in st.session_state.stats}
-    st.rerun()
+# Input
+email_input = st.text_area("Masukkan Email (per baris):", height=150)
+btn_start = st.button("🚀 JALANKAN SEKARANG", use_container_width=True)
+
+# Placeholder untuk Tabel Live Result
+table_placeholder = st.empty()
+
+# --- 5. EKSEKUSI PARALEL ---
+async def run_bulk_check(emails):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        semaphore = asyncio.Semaphore(5) # Maksimal 5 email dicek sekaligus agar aman
+        
+        tasks = []
+        for email in emails:
+            tasks.append(check_single_email(semaphore, browser, email))
+            
+        # Kita ambil hasilnya satu per satu saat selesai (as_completed)
+        for task in asyncio.as_completed(tasks):
+            result = await task
+            
+            # Update Session State
+            st.session_state.results.insert(0, result)
+            st.session_state.stats[result["Status"]] = st.session_state.stats.get(result["Status"], 0) + 1
+            
+            # UPDATE UI SECARA LIVE
+            with stats_container:
+                st_all.metric("ALL", len(st.session_state.results))
+                st_live.metric("LIVE", st.session_state.stats.get("Live", 0))
+                st_verif.metric("VERIF", st.session_state.stats.get("Verif", 0))
+                st_dis.metric("DISABLED", st.session_state.stats.get("Disabled", 0))
+                st_unreg.metric("UNREG", st.session_state.stats.get("Unregistered", 0))
+            
+            # Render Tabel Terbaru
+            df = pd.DataFrame(st.session_state.results)
+            table_placeholder.table(df.head(15)) # Tampilkan 15 hasil terbaru saja agar tidak berat
+
+        await browser.close()
 
 if btn_start and email_input:
-    emails = [e.strip() for e in email_input.split('\n') if e.strip()]
-    st.session_state.stats["ALL"] = len(emails)
+    email_list = [e.strip() for e in email_input.split('\n') if e.strip()]
+    # Reset stats
+    st.session_state.results = []
+    st.session_state.stats = {k: 0 for k in st.session_state.stats}
     
-    prog_bar = st.progress(0)
-    log_status = st.empty()
-    
-    for i, mail in enumerate(emails):
-        log_status.text(f"🔍 Checking: {mail} ({i+1}/{len(emails)})")
-        
-        status = asyncio.run(deep_check_email(mail))
-        
-        # Update Stats & List
-        st.session_state.stats[status] = st.session_state.stats.get(status, 0) + 1
-        st.session_state.results.insert(0, {"Timestamp": pd.Timestamp.now().strftime("%H:%M:%S"), "Email": mail, "Status": status})
-        
-        # UI Update
-        prog_bar.progress((i + 1) / len(emails))
-        
-    log_status.success("🎉 Semua email telah selesai diperiksa!")
-    st.rerun()
-
-# --- 7. HASIL & EKSPOR ---
-if st.session_state.results:
-    st.divider()
-    df = pd.DataFrame(st.session_state.results)
-    
-    col_h1, col_h2 = st.columns([4, 1])
-    col_h1.subheader("📋 Detail Log Pemeriksaan")
-    
-    # Tombol Download
-    csv = df.to_csv(index=False).encode('utf-8')
-    col_h2.download_button("📥 DOWNLOAD CSV", data=csv, file_name="gmail_report.csv", mime="text/csv")
-    
-    # Tabel interaktif
-    st.dataframe(
-        df,
-        column_config={
-            "Status": st.column_config.TextColumn("Status", help="Live, Verif, Disabled, atau Unreg"),
-            "Email": st.column_config.TextColumn("Alamat Email")
-        },
-        use_container_width=True,
-        hide_index=True
-    )
+    # Jalankan Async
+    asyncio.run(run_bulk_check(email_list))
+    st.success("✅ Semua email selesai diperiksa!")
