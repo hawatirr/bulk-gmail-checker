@@ -2,197 +2,191 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
-from streamlit_lottie import st_lottie
 
-# --- 1. CONFIG & CYBER STYLING ---
-st.set_page_config(page_title="Gmail Bulk Checker Pro", layout="wide", page_icon="⚡")
+# --- 1. CONFIG & MILD DARK THEME ---
+st.set_page_config(page_title="Gmail Checker Pro", layout="wide", page_icon="🛡️")
 
-# Handle Secrets/Token
-if "MBAHBABAT_TOKEN" in st.secrets:
-    DEFAULT_TOKEN = st.secrets["MBAHBABAT_TOKEN"]
-else:
-    DEFAULT_TOKEN = ""
+# Token Handling (Gunakan Streamlit Secrets atau isi di sini)
+DEFAULT_TOKEN = st.secrets.get("MBAHBABAT_TOKEN", "")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Roboto+Mono&display=swap');
 
-    .main { 
-        background: #0b0e14; 
-        color: #e0e0e0;
-        font-family: 'Rajdhani', sans-serif;
+    /* Base Theme */
+    .main {
+        background-color: #0d1117;
+        color: #c9d1d9;
+        font-family: 'Inter', sans-serif;
     }
 
-    /* Metric Card Styling */
+    /* Elegant Metric Card */
     div[data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(0, 242, 255, 0.2);
-        border-radius: 15px;
-        padding: 15px !important;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-    }
-    
-    /* Elegant Tab Styling */
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] {
-        background-color: rgba(255,255,255,0.05);
-        border-radius: 10px 10px 0 0;
-        padding: 10px 20px;
-        color: #8b949e;
-    }
-    .stTabs [aria-selected="true"] { 
-        background-color: rgba(0, 242, 255, 0.1) !important;
-        color: #00f2ff !important;
-        border-bottom: 2px solid #00f2ff !important;
-    }
-
-    /* TextArea Styling */
-    .stTextArea textarea {
-        background: #0d1117 !important;
-        color: #00f2ff !important;
-        border: 1px solid #30363d !important;
-        border-radius: 10px !important;
-    }
-
-    /* Cyber Button */
-    .stButton button {
-        background: linear-gradient(90deg, #00f2ff, #008cff);
-        color: white;
-        border: none;
+        background-color: #161b22;
+        border: 1px solid #30363d;
         border-radius: 8px;
-        font-family: 'Orbitron';
-        font-weight: bold;
-        padding: 10px;
-        transition: 0.3s;
+        padding: 15px !important;
+        transition: all 0.3s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        border-color: #58a6ff;
+        background-color: #1c2128;
+    }
+
+    /* Input Area */
+    .stTextArea textarea {
+        background-color: #0d1117 !important;
+        color: #e6edf3 !important;
+        border: 1px solid #30363d !important;
+        border-radius: 6px !important;
+        font-family: 'Roboto Mono', monospace;
+    }
+    .stTextArea textarea:focus {
+        border-color: #58a6ff !important;
+    }
+
+    /* Tabs Customization */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 40px;
+        background-color: #161b22;
+        border-radius: 4px 4px 0 0;
+        border: 1px solid #30363d;
+        color: #8b949e;
+        padding: 0 20px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1c2128 !important;
+        color: #58a6ff !important;
+        border-bottom: 2px solid #58a6ff !important;
+    }
+
+    /* Buttons */
+    .stButton button {
+        background-color: #21262d;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.5rem 1rem;
+        transition: 0.2s;
     }
     .stButton button:hover {
-        transform: scale(1.02);
-        box-shadow: 0 0 15px rgba(0, 242, 255, 0.5);
+        border-color: #8b949e;
+        background-color: #30363d;
+        color: #fff;
     }
+    .stButton button:active {
+        background-color: #282e33;
+    }
+
+    /* Horizontal Line */
+    hr { border: 0; border-top: 1px solid #30363d; margin: 2rem 0; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. ASSETS & LOGIC ---
-def load_lottie(url):
-    try:
-        r = requests.get(url, timeout=5)
-        if r.status_code != 200: return None
-        return r.json()
-    except: return None
+# --- 2. SESSION STATE ---
+if 'results' not in st.session_state:
+    st.session_state.results = {"live": [], "verify": [], "disabled": [], "unregistered": [], "bad": []}
 
-# Radar Animation for scanning
-lottie_radar = load_lottie("https://assets10.lottiefiles.com/packages/lf20_m6cu96ze.json")
-
-if 'db' not in st.session_state:
-    st.session_state.db = {"live": [], "verify": [], "disabled": [], "unregistered": [], "bad": []}
-
-def auto_fix_list(text):
+# --- 3. CORE FUNCTIONS ---
+def clean_and_fix(text):
     emails = []
+    # Split by newline or comma
     items = text.replace(",", "\n").split("\n")
     for x in items:
         clean = x.strip().lower()
         if clean:
             emails.append(clean if "@" in clean else f"{clean}@gmail.com")
-    return list(dict.fromkeys(emails)) # Remove duplicates
+    return list(dict.fromkeys(emails)) # Unique values
 
-def call_api(emails, token):
+def fetch_api(chunk, token):
     url = "https://gmail-validation.mbahbabat.workers.dev/check1"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
-        r = requests.post(url, headers=headers, json={"mail": emails}, timeout=60)
+        r = requests.post(url, headers=headers, json={"mail": chunk}, timeout=60)
         return r.json() if r.status_code == 200 else None
-    except: return None
+    except:
+        return None
 
-# --- 3. LAYOUT: TOP SECTION ---
-t1, t2 = st.columns([3, 1])
-with t1:
-    st.markdown("<h1 style='color: #00f2ff; margin-bottom: 0;'>⚡ CYBER CHECKER PRO</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #8b949e; margin-top: -10px;'>Advanced Multi-Account Gmail Validation</p>", unsafe_allow_html=True)
+# --- 4. HEADER & API CONFIG ---
+st.markdown("### 🛡️ Gmail Bulk Checker")
+st.caption("Secure, Clean, and Professional Validation")
 
-with t2:
-    # Expander untuk sembunyikan Token
-    with st.expander("🛠️ API CONFIG"):
-        token_input = st.text_input("Bearer Token", value=DEFAULT_TOKEN, type="password")
+with st.expander("🔑 API Configuration"):
+    token = st.text_input("Bearer Token", value=DEFAULT_TOKEN, type="password")
 
-# --- 4. INPUT SECTION ---
-st.divider()
-email_raw = st.text_area("📧 INPUT EMAILS", height=180, placeholder="Paste emails here... (user1, user2@gmail.com, etc)")
+# --- 5. INPUT SECTION (TOP) ---
+email_raw = st.text_area("Input Emails", height=200, placeholder="Enter emails or usernames (auto-detect @gmail.com)...")
 
-c1, c2, c3 = st.columns([1.5, 1.5, 4])
-start_btn = c1.button("🚀 EXECUTE SCAN", use_container_width=True)
-if c2.button("🧹 PURGE DATA", use_container_width=True):
-    st.session_state.db = {k: [] for k in st.session_state.db}
+c1, c2, _ = st.columns([1, 1, 3])
+start_btn = c1.button("Execute Check", use_container_width=True)
+if c2.button("Clear All", use_container_width=True):
+    st.session_state.results = {k: [] for k in st.session_state.results}
     st.rerun()
 
-# --- 5. EXECUTION ENGINE ---
+# --- 6. PROCESSING LOGIC ---
 if start_btn:
-    if not token_input:
-        st.error("❗ Access Denied: Missing API Token")
+    if not token:
+        st.error("Please provide a valid API Token.")
     elif not email_raw:
-        st.warning("❗ Warning: No Data to Scan")
+        st.warning("Input list is empty.")
     else:
-        emails = auto_fix_list(email_raw)
-        st.session_state.db = {k: [] for k in st.session_state.db} # Reset
+        emails = clean_and_fix(email_raw)
+        st.session_state.results = {k: [] for k in st.session_state.results} # Reset
         
-        # Display Scanning Animation
-        with st.container():
-            col_ani, col_txt = st.columns([1, 4])
-            with col_ani:
-                if lottie_radar:
-                    st_lottie(lottie_radar, height=120, key="scanning")
-                else:
-                    st.write("🌀")
-            with col_txt:
-                msg = st.empty()
-                prog = st.progress(0)
-
-        # Batch Processing
+        # Simple & Clean Progress UI
+        status_info = st.empty()
+        progress_bar = st.progress(0)
+        
         chunks = [emails[i:i+100] for i in range(0, len(emails), 100)]
-        for i, chunk in enumerate(chunks):
-            msg.markdown(f"📡 **Scanning Phase {i+1}/{len(chunks)}...**")
-            results = call_api(chunk, token_input)
-            if results:
-                for item in results:
-                    st.session_state.db[item['status'].lower()].append(item['email'])
-            prog.progress((i+1)/len(chunks))
         
-        msg.success(f"⚡ **SCAN COMPLETE: {len(emails)} Targets Processed!**")
-        st.balloons()
+        for i, chunk in enumerate(chunks):
+            status_info.markdown(f"⚙️ Processing: {i*100 + len(chunk)} / {len(emails)}")
+            res_data = fetch_api(chunk, token)
+            if res_data:
+                for item in res_data:
+                    st.session_state.results[item['status'].lower()].append(item['email'])
+            
+            progress_bar.progress((i + 1) / len(chunks))
+            time.sleep(0.1) # Smoothness
+            
+        status_info.success(f"Done! Checked {len(emails)} emails.")
 
-# --- 6. STATS DASHBOARD ---
-st.divider()
+# --- 7. METRICS DASHBOARD ---
+st.markdown("---")
 m = st.columns(5)
-m_colors = ["#00f2ff", "#ffcc00", "#ff4d4d", "#008cff", "#e600ac"]
-m_labels = ["LIVE", "VERIFY", "DISABLED", "UNREG", "BAD"]
+m_labels = ["Live", "Verify", "Disabled", "Unreg", "Bad"]
 m_keys = ["live", "verify", "disabled", "unregistered", "bad"]
+m_colors = ["#2ecc71", "#f1c40f", "#e74c3c", "#3498db", "#9b59b6"] # Professional Muted Colors
 
 for i in range(5):
     with m[i]:
-        st.markdown(f"""
-            <div style='text-align: center;'>
-                <p style='color: {m_colors[i]}; font-size: 0.8rem; margin-bottom: -5px;'>{m_labels[i]}</p>
-                <h2 style='color: white;'>{len(st.session_state.db[m_keys[i]])}</h2>
-            </div>
-        """, unsafe_allow_html=True)
+        st.metric(label=m_labels[i], value=len(st.session_state.results[m_keys[i]]))
 
-# --- 7. RESULT CENTER (GROUPED & COPYABLE) ---
-st.markdown("### 🧬 EXTRACTION CENTER")
-tabs = st.tabs([f"✅ {l}" for l in m_labels])
+# --- 8. RESULT TABS (COPY-PASTE READY) ---
+st.markdown("### Result Center")
+tabs = st.tabs([f"{l}" for l in m_labels])
 
 for i, tab in enumerate(tabs):
     with tab:
-        data = st.session_state.db[m_keys[i]]
+        data = st.session_state.results[m_keys[i]]
         if data:
-            st.markdown(f"<p style='color: {m_colors[i]};'>Total: {len(data)} items</p>", unsafe_allow_html=True)
-            email_string = "\n".join(data)
+            st.markdown(f"**Total found:** `{len(data)}` email(s)")
+            email_str = "\n".join(data)
             
-            # Box hasil dengan tombol Copy bawaan
-            st.code(email_string, language="text")
+            # st.code menyediakan tombol copy otomatis yang sangat bersih
+            st.code(email_str, language="text")
             
-            # Action buttons
-            b1, b2 = st.columns([1, 4])
-            b1.download_button(f"📥 Download {m_labels[i]}", email_string, file_name=f"{m_keys[i]}.txt")
+            # Simple Download Button
+            st.download_button(
+                label=f"Download {m_labels[i]} List",
+                data=email_str,
+                file_name=f"{m_keys[i]}_results.txt",
+                mime="text/plain"
+            )
         else:
-            st.info("Sector empty.")
+            st.info("No data available for this category.")
 
-st.markdown("<br><p style='text-align: center; opacity: 0.2;'>⚡ V6.1 CYBER-ENGINE | ENCRYPTED | NO-LOGS</p>", unsafe_allow_html=True)
+st.markdown("<br><p style='text-align: center; opacity: 0.3; font-size: 0.8rem;'>v6.2 | Midnight Professional</p>", unsafe_allow_html=True)
