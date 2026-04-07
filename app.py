@@ -1,163 +1,159 @@
 import streamlit as st
-import asyncio
-import os
-import sys
-import subprocess
+import requests
 import pandas as pd
-import random
-from playwright.async_api import async_playwright
+import time
 
-# --- 1. ENGINE BOOTSTRAP ---
-@st.cache_resource(show_spinner=False)
-def install_playwright():
-    try:
-        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-        return True
-    except:
-        return False
+# --- 1. CONFIG & STYLING (ELEGANT & RESPONSIVE) ---
+st.set_page_config(page_title="Gmail Bulk Checker Pro", layout="wide", page_icon="🛡️")
 
-# --- 2. CONFIG & INITIALIZATION ---
-st.set_page_config(page_title="Gmail V3 Private Checker", layout="wide")
+# Custom CSS untuk tampilan elegan dan tombol copy
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono&display=swap');
+    
+    .main { background-color: #0d1117; color: #f0f0f0; }
+    .stMetric { background-color: #161b22; padding: 20px; border-radius: 12px; border: 1px solid #30363d; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .result-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; transition: 0.3s; }
+    .result-card:hover { border-color: #ff4500; background: #1c2128; }
+    
+    /* Status Colors */
+    .status-live { color: #00FF7F; font-weight: bold; }
+    .status-verify { color: #FFD700; font-weight: bold; }
+    .status-disabled { color: #FF6347; font-weight: bold; }
+    .status-unreg { color: #00CCFF; font-weight: bold; }
+    .status-bad { color: #E600AC; font-weight: bold; }
+    
+    /* Copy Button Style */
+    .copy-btn { background: #ff4500; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: 'Orbitron'; }
+    .copy-btn:active { transform: scale(0.95); }
+    </style>
+""", unsafe_allow_html=True)
 
-if 'setup_done' not in st.session_state:
-    with st.spinner("🛠️ Menyiapkan Engine Browser..."):
-        install_playwright()
-        st.session_state.setup_done = True
-
-# Definisikan Kunci Status
-STATUS_KEYS = ["ALL", "Live", "Verif", "Disabled", "Unregistered", "Bad"]
-
-if 'stats' not in st.session_state:
-    st.session_state.stats = {k: 0 for k in STATUS_KEYS}
+# --- 2. SESSION STATE ---
 if 'results' not in st.session_state:
     st.session_state.results = []
+if 'stats' not in st.session_state:
+    st.session_state.stats = {"live": 0, "verify": 0, "disabled": 0, "unregistered": 0, "bad": 0}
 
-# --- 3. CORE ACCURATE LOGIC ---
-async def check_gmail_v3(semaphore, browser, email):
-    async with semaphore:
-        # Context dengan Sidik Jari Browser
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            viewport={'width': 1280, 'height': 800},
-            locale="en-US"
-        )
-        page = await context.new_page()
-        res_status = "Bad"
-        
-        try:
-            # Akses Google V3
-            await page.goto('https://accounts.google.com/v3/signin/identifier?flowName=GlifWebSignIn', timeout=60000)
-            
-            # Isi Email & Enter
-            await page.fill('input[type="email"]', email)
-            await asyncio.sleep(random.uniform(0.5, 1.0))
-            await page.keyboard.press("Enter")
-            
-            # KUNCI AKURASI: Tunggu URL berubah dari 'identifier'
-            try:
-                # Tunggu max 12 detik sampai halaman berganti
-                await page.wait_for_url(lambda url: "identifier" not in url, timeout=12000)
-            except:
-                pass 
-            
-            current_url = page.url
-            content = await page.content()
+# --- 3. HELPER FUNCTIONS ---
+def auto_fix_email(email_str):
+    """Mendeteksi dan memperbaiki email jika tanpa @gmail.com"""
+    email = email_str.strip().lower()
+    if not email: return None
+    if "@" not in email:
+        return f"{email}@gmail.com"
+    return email
 
-            # --- DETEKSI BERDASARKAN POLA URL V3 & ELEMEN ---
-            
-            # 1. LIVE: Berhasil masuk ke tantangan Password (/challenge/pwd)
-            if "/challenge/pwd" in current_url or await page.query_selector('input[type="password"]'):
-                res_status = "Live"
-            
-            # 2. UNREGISTERED: Tetap di identifier atau muncul pesan error merah
-            elif "Gagal menemukan" in content or "Couldn't find" in content or await page.query_selector('#identifierError'):
-                res_status = "Unregistered"
-            
-            # 3. DISABLED: URL mengandung denied/disabled atau pesan khusus
-            elif "disabled" in current_url or "disabled" in content.lower() or "dinonaktifkan" in content:
-                res_status = "Disabled"
-            
-            # 4. VERIF: Pola recaptcha, selection, atau OTP (Berdasarkan link test kamu)
-            elif "/challenge/recaptcha" in current_url or "/challenge/selection" in current_url or "/challenge/challenge" in current_url:
-                res_status = "Verif"
-            
-            # 5. BAD/LIMIT: Terkena Captcha di awal atau "Too many attempts"
-            elif "captcha" in content.lower() or "Too many attempts" in content:
-                res_status = "Bad"
-            
-            else:
-                res_status = "Bad"
+def call_checker_api(emails, token):
+    url = "https://gmail-validation.mbahbabat.workers.dev/check1"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    payload = {"mail": emails}
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        return response.json() if response.status_code == 200 else None
+    except:
+        return None
 
-        except Exception:
-            res_status = "Bad"
-        finally:
-            await context.close()
-            return {"Email": email, "Status": res_status}
+# --- 4. SIDEBAR & HEADER ---
+with st.sidebar:
+    st.title("🔑 SETTINGS")
+    api_token = st.text_input("API Bearer Token:", type="password", placeholder="Paste your token here...")
+    st.markdown("[Dapatkan Token Di Sini](https://mbahbabat.github.io/bulk-gmail-checker/id/execute/)")
+    st.divider()
+    st.caption("v1.0 - Powered by Mbahbabat API")
 
-# --- 4. DASHBOARD UI ---
-st.title("🛡️ Gmail Bulk Checker V3 (Private Mode)")
-st.info("Mesin mandiri tanpa API Key pihak ketiga.")
+st.title("🛡️ BULK GMAIL CHECKER PRO")
+st.write("Cek status akun Google massal dengan kecepatan tinggi dan hasil akurat.")
 
-# Dashboard Metrik
-stats_ui = st.empty()
-def render_stats():
-    with stats_ui.container():
-        cols = st.columns(6)
-        cols[0].metric("ALL", len(st.session_state.results))
-        cols[1].metric("LIVE ✅", st.session_state.stats["Live"])
-        cols[2].metric("VERIF 🔑", st.session_state.stats["Verif"])
-        cols[3].metric("DISABLED 🚫", st.session_state.stats["Disabled"])
-        cols[4].metric("UNREG ❓", st.session_state.stats["Unregistered"])
-        cols[5].metric("BAD ⚠️", st.session_state.stats["Bad"])
+# --- 5. DASHBOARD STATS (LIVE) ---
+stat_cols = st.columns(5)
+metrics = {
+    "live": stat_cols[0].empty(),
+    "verify": stat_cols[1].empty(),
+    "disabled": stat_cols[2].empty(),
+    "unregistered": stat_cols[3].empty(),
+    "bad": stat_cols[4].empty()
+}
 
-render_stats()
+def update_metrics():
+    for key in metrics:
+        color_label = key.upper()
+        metrics[key].metric(label=color_label, value=st.session_state.stats[key])
 
-# Input & Control
-email_input = st.text_area("Masukkan Email (per baris):", height=150)
-c1, c2 = st.columns([1, 4])
-btn_run = c1.button("🚀 EXECUTE", use_container_width=True)
-if c2.button("🧹 RESET"):
+update_metrics()
+
+# --- 6. INPUT AREA ---
+email_input = st.text_area("Masukkan Email (per baris atau pisahkan dengan koma):", height=150, placeholder="user1\nuser2@gmail.com\nuser3")
+
+col_start, col_clear, _ = st.columns([1.5, 1.5, 5])
+btn_run = col_start.button("🚀 EXECUTE CHECK", use_container_width=True)
+if col_clear.button("🧹 CLEAR ALL", use_container_width=True):
     st.session_state.results = []
-    st.session_state.stats = {k: 0 for k in STATUS_KEYS}
+    st.session_state.stats = {k: 0 for k in st.session_state.stats}
     st.rerun()
 
-table_ui = st.empty()
+# Container untuk Live Result
+live_result_container = st.container()
 
-# --- 5. EXECUTION ---
-async def start_process(emails):
-    async with async_playwright() as p:
-        # Launch browser dengan Anti-Bot flags
-        browser = await p.chromium.launch(headless=True, args=[
-            '--disable-blink-features=AutomationControlled',
-            '--no-sandbox'
-        ])
+# --- 7. MAIN LOGIC ---
+if btn_run:
+    if not api_token:
+        st.error("❌ Silakan masukkan API Token di sidebar!")
+    elif not email_input:
+        st.warning("⚠️ Masukkan daftar email terlebih dahulu!")
+    else:
+        # 1. Parsing & Auto-Fixing
+        raw_emails = email_input.replace(",", "\n").split("\n")
+        clean_emails = []
+        for e in raw_emails:
+            fixed = auto_fix_email(e)
+            if fixed: clean_emails.append(fixed)
         
-        # Kecepatan 1 (SANGAT PENTING untuk Streamlit Cloud agar RAM tidak crash)
-        semaphore = asyncio.Semaphore(1) 
-        tasks = [check_gmail_v3(semaphore, browser, email) for email in emails]
+        # 2. Chunking (API Limit 100 per request)
+        chunk_size = 100
+        chunks = [clean_emails[i:i + chunk_size] for i in range(0, len(clean_emails), chunk_size)]
         
-        # Live Update
-        for task in asyncio.as_completed(tasks):
-            res = await task
-            # Update data
-            st.session_state.results.insert(0, res)
-            st.session_state.stats[res["Status"]] = st.session_state.stats.get(res["Status"], 0) + 1
+        progress_bar = st.progress(0)
+        
+        for idx, chunk in enumerate(chunks):
+            api_results = call_checker_api(chunk, api_token)
             
-            # Update Dashboard & Tabel secara Real-time
-            render_stats()
-            with table_ui.container():
-                st.dataframe(pd.DataFrame(st.session_state.results), use_container_width=True, hide_index=True)
-        
-        await browser.close()
+            if api_results:
+                for item in api_results:
+                    email = item['email']
+                    status = item['status'].lower()
+                    
+                    # Update Stats
+                    if status in st.session_state.stats:
+                        st.session_state.stats[status] += 1
+                    
+                    # Store Result
+                    res_entry = {"email": email, "status": status}
+                    st.session_state.results.insert(0, res_entry)
+                    
+                    # LIVE RESULT DISPLAY (Elegant Card with Copy Button)
+                    with live_result_container:
+                        status_class = f"status-{status}"
+                        st.markdown(f"""
+                            <div class="result-card">
+                                <div>
+                                    <span style="font-family: 'Roboto Mono';">{email}</span>
+                                    <span class="{status_class}" style="margin-left: 15px;">[{status.upper()}]</span>
+                                </div>
+                                <button class="copy-btn" onclick="navigator.clipboard.writeText('{email}')">COPY</button>
+                            </div>
+                        """, unsafe_allow_html=True)
+                
+                update_metrics()
+            
+            progress = (idx + 1) / len(chunks)
+            progress_bar.progress(progress)
+            
+        st.success(f"✅ Selesai! {len(clean_emails)} email telah diperiksa.")
 
-if btn_run and email_input:
-    email_list = [e.strip() for e in email_input.split('\n') if e.strip()]
-    st.session_state.results = []
-    st.session_state.stats = {k: 0 for k in STATUS_KEYS}
-    
-    asyncio.run(start_process(email_list))
-    
-    # Download Button
-    df_final = pd.DataFrame(st.session_state.results)
-    st.download_button("📥 DOWNLOAD CSV", data=df_final.to_csv(index=False), file_name="check_result.csv", mime="text/csv")
-    st.success("✅ Pengecekan Selesai!")
+# Tombol Download di Akhir
+if st.session_state.results:
+    st.divider()
+    df = pd.DataFrame(st.session_state.results)
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 DOWNLOAD CSV REPORT", data=csv, file_name="gmail_check_results.csv", mime="text/csv")
