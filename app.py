@@ -1,29 +1,33 @@
 import streamlit as st
 import requests
 import pandas as pd
-import time
 
-# --- 1. CONFIG & THEME (MIDNIGHT DARK) ---
+# --- 1. CONFIG & SOFT DARK THEME ---
 st.set_page_config(page_title="Gmail Checker Pro", layout="wide", page_icon="🛡️")
 
-# Ambil token dari Secrets jika ada
+# Token Handling dari Secrets
 DEFAULT_TOKEN = st.secrets.get("MBAHBABAT_TOKEN", "")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Roboto+Mono&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Roboto+Mono&display=swap');
 
-    .main { background-color: #0d1117; color: #c9d1d9; font-family: 'Inter', sans-serif; }
+    /* Background Soft Dark (Tidak kontras tajam) */
+    .main { 
+        background-color: #0d1117; 
+        color: #c9d1d9; 
+        font-family: 'Inter', sans-serif; 
+    }
     
-    /* Card Styling */
+    /* Card/Metric - Soft Grey */
     div[data-testid="stMetric"] {
         background-color: #161b22;
         border: 1px solid #30363d;
         border-radius: 10px;
         padding: 15px !important;
     }
-
-    /* Input Area */
+    
+    /* Text Area - Dark & Clean */
     .stTextArea textarea {
         background-color: #0d1117 !important;
         color: #e6edf3 !important;
@@ -32,29 +36,47 @@ st.markdown("""
         font-family: 'Roboto Mono', monospace;
     }
 
-    /* Tabs */
+    /* Tab Styling - Muted Colors */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
     .stTabs [data-baseweb="tab"] {
         background-color: #161b22;
-        border-radius: 5px 5px 0 0;
+        border-radius: 6px 6px 0 0;
         border: 1px solid #30363d;
         color: #8b949e;
+        padding: 8px 16px;
     }
     .stTabs [aria-selected="true"] {
         background-color: #1c2128 !important;
         color: #58a6ff !important;
         border-bottom: 2px solid #58a6ff !important;
     }
+
+    /* Button - Professional Grey */
+    .stButton button {
+        background-color: #21262d;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        transition: 0.2s;
+    }
+    .stButton button:hover {
+        background-color: #30363d;
+        border-color: #8b949e;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. SESSION STATE ---
-# Inisialisasi list penampung hasil
+# --- 2. SESSION STATE (BULLTEPROOF INITIALIZATION) ---
 if 'results' not in st.session_state:
-    st.session_state.results = {"live": [], "verify": [], "disabled": [], "unregistered": [], "bad": []}
+    st.session_state.results = {"all": [], "live": [], "verify": [], "disabled": [], "unregistered": [], "bad": []}
 
-# --- 3. FUNCTIONS ---
-def auto_fix(text):
+# Fungsi untuk Reset Input tanpa Error
+def clear_text_input():
+    st.session_state["email_input_key"] = ""
+    st.session_state.results = {k: [] for k in st.session_state.results}
+
+# --- 3. HELPER FUNCTIONS ---
+def auto_fix_emails(text):
     emails = []
     items = text.replace(",", "\n").split("\n")
     for x in items:
@@ -63,76 +85,76 @@ def auto_fix(text):
             emails.append(clean if "@" in clean else f"{clean}@gmail.com")
     return list(dict.fromkeys(emails))
 
-def call_api(chunk, token):
+def call_api_checker(chunk, token):
     url = "https://gmail-validation.mbahbabat.workers.dev/check1"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
         r = requests.post(url, headers=headers, json={"mail": chunk}, timeout=60)
         return r.json() if r.status_code == 200 else None
-    except:
-        return None
+    except: return None
 
-# --- 4. UI HEADER ---
-st.markdown("### 🛡️ Gmail Bulk Checker")
-st.caption("Midnight Professional - Clean & Accurate")
+# --- 4. HEADER ---
+st.markdown("### 🛡️ Gmail Checker Professional")
+st.caption("Soft Midnight Design • High Accuracy • Independent API")
 
 with st.expander("🛠️ API Configuration"):
-    token = st.text_input("Bearer Token", value=DEFAULT_TOKEN, type="password")
+    token_val = st.text_input("Bearer Token", value=DEFAULT_TOKEN, type="password")
 
-# --- 5. INPUT AREA (WITH CLEAR FUNCTION) ---
-# Gunakan key agar bisa di-reset lewat session_state
-if "input_val" not in st.session_state:
-    st.session_state.input_val = ""
+# --- 5. INPUT AREA ---
+# Menggunakan key "email_input_key" agar bisa direset via fungsi callback
+email_raw = st.text_area("Input Mails", height=200, key="email_input_key", 
+                         placeholder="Paste usernames or emails here...")
 
-email_raw = st.text_area("Input Emails", height=200, key="main_input", placeholder="user1\nuser2@gmail.com\nuser3")
+col1, col2, col3, _ = st.columns([1.5, 1.5, 1.5, 4])
 
-c1, c2, c3, _ = st.columns([1, 1, 1, 4])
-start_btn = c1.button("🚀 EXECUTE", use_container_width=True)
+# Tombol Execute
+start_btn = col1.button("🚀 EXECUTE", use_container_width=True)
 
-# Fungsi Clear Input
-if c2.button("🧹 CLEAR", use_container_width=True):
-    st.session_state.main_input = "" # Reset widget
-    st.rerun()
+# Tombol Clear (Memanggil fungsi callback agar tidak error)
+col2.button("🧹 CLEAR", on_click=clear_text_input, use_container_width=True)
 
-# Info Paste
-c3.info("💡 Tip: Use `Ctrl+V` to Paste")
+# Info Paste (Browser tidak mengizinkan akses clipboard otomatis demi keamanan)
+col3.info("💡 `Ctrl + V` to Paste")
 
-# --- 6. EXECUTION ---
+# --- 6. LOGIKA PENGECEKAN ---
 if start_btn:
-    if not token:
-        st.error("API Token Required.")
+    if not token_val:
+        st.error("Token API dibutuhkan.")
     elif not email_raw:
-        st.warning("Input is empty.")
+        st.warning("Daftar email kosong.")
     else:
-        emails = auto_fix(email_raw)
-        # Reset results sebelum mulai baru
+        emails_list = auto_fix_emails(email_raw)
+        # Reset hasil lama
         st.session_state.results = {k: [] for k in st.session_state.results}
         
-        status_info = st.empty()
+        status_msg = st.empty()
         progress_bar = st.progress(0)
         
-        chunks = [emails[i:i+100] for i in range(0, len(emails), 100)]
+        chunks = [emails_list[i:i+100] for i in range(0, len(emails_list), 100)]
         
         for i, chunk in enumerate(chunks):
-            status_info.markdown(f"⚙️ Processing: {i*100 + len(chunk)} / {len(emails)}")
-            res_data = call_api(chunk, token)
+            status_msg.markdown(f"⚙️ Processing Batch {i+1}/{len(chunks)}...")
+            data = call_api_checker(chunk, token_val)
             
-            if res_data:
-                for item in res_data:
-                    raw_status = item['status'].lower()
-                    email_addr = item['email']
+            if data:
+                for item in data:
+                    email = item['email']
+                    status = item['status'].lower()
                     
-                    # FIX KEYERROR: Jika status API tidak ada di dict, masukkan ke 'bad'
-                    if raw_status in st.session_state.results:
-                        st.session_state.results[raw_status].append(email_addr)
+                    # Tambahkan ke kategori ALL
+                    st.session_state.results["all"].append(f"{email} | {status.upper()}")
+                    
+                    # Tambahkan ke kategori spesifik
+                    if status in st.session_state.results:
+                        st.session_state.results[status].append(email)
                     else:
-                        st.session_state.results["bad"].append(email_addr)
+                        st.session_state.results["bad"].append(email)
             
             progress_bar.progress((i + 1) / len(chunks))
             
-        status_info.success(f"Finished. Total {len(emails)} targets.")
+        status_msg.success(f"Pengecekan selesai. {len(emails_list)} email diproses.")
 
-# --- 7. STATS & RESULT CENTER ---
+# --- 7. DASHBOARD & RESULT ---
 st.divider()
 m = st.columns(5)
 m_keys = ["live", "verify", "disabled", "unregistered", "bad"]
@@ -141,25 +163,32 @@ m_labels = ["LIVE", "VERIFY", "DISABLED", "UNREG", "BAD"]
 for i in range(5):
     m[i].metric(label=m_labels[i], value=len(st.session_state.results[m_keys[i]]))
 
-st.markdown("### 📋 Result Center")
-tabs = st.tabs([f"{l}" for l in m_labels])
+st.markdown("#### 📋 Result Center")
+# Tambahkan Tab ALL di paling depan
+tab_list = ["📊 ALL RESULT"] + [f"{l}" for l in m_labels]
+tabs = st.tabs(tab_list)
 
-for i, tab in enumerate(tabs):
-    with tab:
-        data = st.session_state.results[m_keys[i]]
+# Render Tab ALL
+with tabs[0]:
+    all_data = st.session_state.results["all"]
+    if all_data:
+        st.markdown(f"**Total Data Checked:** `{len(all_data)}`")
+        st.code("\n".join(all_data), language="text")
+        st.download_button("📥 Download All", "\n".join(all_data), file_name="all_results.txt")
+    else:
+        st.info("No data.")
+
+# Render Tab Spesifik (1-5)
+for i in range(1, 6):
+    key = m_keys[i-1]
+    label = m_labels[i-1]
+    with tabs[i]:
+        data = st.session_state.results[key]
         if data:
-            st.markdown(f"**Total Found:** `{len(data)}` email(s)")
-            email_str = "\n".join(data)
-            
-            # st.code otomatis memberikan tombol COPY di pojok kanan atas
-            st.code(email_str, language="text")
-            
-            st.download_button(
-                label=f"Download {m_labels[i]}",
-                data=email_str,
-                file_name=f"{m_keys[i]}_results.txt"
-            )
+            st.markdown(f"**Status {label}:** `{len(data)}` email(s)")
+            st.code("\n".join(data), language="text")
+            st.download_button(f"📥 Download {label}", "\n".join(data), file_name=f"{key}.txt")
         else:
-            st.info("No data available.")
+            st.info(f"No {label} emails found.")
 
-st.markdown("<br><p style='text-align: center; opacity: 0.3; font-size: 0.7rem;'>v6.2.1 | Stable Midnight Edition</p>", unsafe_allow_html=True)
+st.markdown("<br><p style='text-align: center; opacity: 0.3; font-size: 0.7rem;'>Midnight Edition v6.3 | Stable API Integration</p>", unsafe_allow_html=True)
