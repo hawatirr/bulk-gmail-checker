@@ -2,6 +2,18 @@ import streamlit as st
 import asyncio
 from playwright.async_api import async_playwright
 
+# --- TAMBAHKAN KODE INI ---
+# Fungsi untuk memastikan browser terinstall di server Streamlit
+def install_playwright():
+    os.system("playwright install chromium")
+
+# Jalankan instalasi saat script pertama kali dimuat
+if 'browser_installed' not in st.session_state:
+    with st.spinner("Initializing browser engine... Please wait..."):
+        install_playwright()
+        st.session_state.browser_installed = True
+# --------------------------
+
 st.set_page_config(page_title="Bulk Gmail Checker", layout="wide")
 
 # Custom CSS agar mirip dashboard profesional
