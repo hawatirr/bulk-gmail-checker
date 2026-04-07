@@ -1,102 +1,104 @@
 import streamlit as st
 import asyncio
+import os  # <--- Ini yang tadi menyebabkan NameError jika terlewat
+import subprocess
 from playwright.async_api import async_playwright
 
-# --- TAMBAHKAN KODE INI ---
-# Fungsi untuk memastikan browser terinstall di server Streamlit
+# 1. Fungsi untuk Install Browser di Server (Hanya jalan sekali)
 def install_playwright():
-    os.system("playwright install chromium")
+    try:
+        # Menjalankan perintah terminal dari dalam Python
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+        return True
+    except Exception as e:
+        st.error(f"Error installing browser: {e}")
+        return False
 
-# Jalankan instalasi saat script pertama kali dimuat
+# Jalankan instalasi saat pertama kali buka website
 if 'browser_installed' not in st.session_state:
-    with st.spinner("Initializing browser engine... Please wait..."):
-        install_playwright()
-        st.session_state.browser_installed = True
-# --------------------------
+    with st.spinner("📦 Menyiapkan mesin browser (ini hanya sekali)..."):
+        if install_playwright():
+            st.session_state.browser_installed = True
 
+# 2. Konfigurasi UI Dashboard
 st.set_page_config(page_title="Bulk Gmail Checker", layout="wide")
 
-# Custom CSS agar mirip dashboard profesional
-st.markdown("""
-    <style>
-    .stMetric { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border: 1px solid #d1d5db; }
-    </style>
-""", unsafe_allow_html=True)
+st.title("🛡️ Google Bulk Email Checker")
+st.write("Cek status email massal (Live, Verif, Unreg, Disabled) tanpa login.")
 
-st.title("🛡️ Google Bulk Email Checker (No Login)")
-
-# State untuk menyimpan hasil
+# Inisialisasi data di memori
 if 'results_list' not in st.session_state:
     st.session_state.results_list = []
 if 'stats' not in st.session_state:
     st.session_state.stats = {"ALL": 0, "Live": 0, "Verif": 0, "Disabled": 0, "Unregistered": 0}
 
-# UI Input
-email_input = st.text_area("Masukkan List Email (Satu per baris):", height=150)
-col_btn1, col_btn2 = st.columns([1, 5])
-start_btn = col_btn1.button("🚀 EXECUTE")
-clear_btn = col_btn2.button("🧹 CLEAR")
+# --- Tampilan Statistik ---
+cols = st.columns(5)
+cols[0].metric("ALL", st.session_state.stats["ALL"])
+cols[1].metric("LIVE", st.session_state.stats["Live"])
+cols[2].metric("VERIF", st.session_state.stats["Verif"])
+cols[3].metric("DISABLED", st.session_state.stats["Disabled"])
+cols[4].metric("UNREG", st.session_state.stats["Unregistered"])
 
-if clear_btn:
+# Input List Email
+email_input = st.text_area("Masukkan Email (per baris):", height=150, placeholder="email@gmail.com")
+col1, col2 = st.columns([1, 5])
+btn_run = col1.button("🚀 MULAI")
+btn_clear = col2.button("🧹 BERSIHKAN")
+
+if btn_clear:
     st.session_state.results_list = []
-    st.session_state.stats = {"ALL": 0, "Live": 0, "Verif": 0, "Disabled": 0, "Unregistered": 0}
+    st.session_state.stats = {k: 0 for k in st.session_state.stats}
     st.rerun()
 
-# Dashboard Statistik
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("ALL", st.session_state.stats["ALL"])
-c2.metric("LIVE", st.session_state.stats["Live"], delta_color="normal")
-c3.metric("VERIF", st.session_state.stats["Verif"])
-c4.metric("DISABLED", st.session_state.stats["Disabled"])
-c5.metric("UNREG", st.session_state.stats["Unregistered"])
-
+# 3. Logika Utama Pengecekan
 async def check_email(email):
     async with async_playwright() as p:
-        # Menjalankan browser tanpa tampilan (headless)
+        # Launch browser dengan mode headless (tanpa tampilan)
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         try:
-            # Gunakan halaman Recovery untuk intip status tanpa password
-            await page.goto('https://accounts.google.com/signin/v2/recoveryidentifier', timeout=30000)
+            # Gunakan Recovery Endpoint
+            await page.goto('https://accounts.google.com/signin/v2/recoveryidentifier', timeout=60000)
             await page.fill('input[type="email"]', email)
             await page.click('#recoveryIdentifierNext')
-            await asyncio.sleep(3) # Jeda agar tidak dianggap bot
+            await asyncio.sleep(3) # Jeda agar tidak dianggap robot
             
             content = await page.content()
-            if "Couldn't find" in content or "Gagal menemukan" in content:
+            if "Gagal menemukan" in content or "Couldn't find" in content:
                 return "Unregistered"
-            elif "disabled" in content or "dinonaktifkan" in content:
+            elif "dinonaktifkan" in content or "disabled" in content:
                 return "Disabled"
-            elif "verification" in content or "verifikasi" in content:
+            elif "verifikasi" in content or "verification" in content or "otp" in content.lower():
                 return "Verif"
             else:
                 return "Live"
-        except:
+        except Exception:
             return "Error"
         finally:
             await browser.close()
 
-if start_btn and email_input:
+# 4. Eksekusi saat Tombol Mulai diklik
+if btn_run and email_input:
     emails = [e.strip() for e in email_input.split('\n') if e.strip()]
     st.session_state.stats["ALL"] = len(emails)
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    status_bar = st.progress(0)
     
     for i, mail in enumerate(emails):
         status = asyncio.run(check_email(mail))
         
-        # Update Stats & List
+        # Update statistik & hasil
         st.session_state.stats[status] = st.session_state.stats.get(status, 0) + 1
-        st.session_state.results_list.insert(0, {"email": mail, "status": status})
+        st.session_state.results_list.insert(0, {"Email": mail, "Status": status})
         
-        # Update UI secara real-time
-        progress_bar.progress((i + 1) / len(emails))
-        status_text.text(f"Checking: {mail}...")
+        # Update UI secara visual
+        status_bar.progress((i + 1) / len(emails))
         
     st.rerun()
 
-# Tabel Hasil
+# Tampilkan Tabel Hasil
 if st.session_state.results_list:
-    st.write("### Result Details")
+    st.write("---")
+    st.write("### 📋 Detail Hasil")
     st.table(st.session_state.results_list)
