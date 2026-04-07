@@ -1,70 +1,91 @@
 import streamlit as st
 import asyncio
-import os  # <--- Ini yang tadi menyebabkan NameError jika terlewat
+import os
+import sys
 import subprocess
+import pandas as pd
 from playwright.async_api import async_playwright
 
-# 1. Fungsi untuk Install Browser di Server (Hanya jalan sekali)
+# --- KONFIGURASI INSTALASI BROWSER ---
 def install_playwright():
+    """Fungsi untuk menginstal Chromium di server Streamlit Cloud"""
     try:
-        # Menjalankan perintah terminal dari dalam Python
-        subprocess.run(["playwright", "install", "chromium"], check=True)
+        # Menjalankan perintah instalasi menggunakan executable python yang aktif
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        # Instalasi dependencies tambahan jika diperlukan
+        subprocess.run([sys.executable, "-m", "playwright", "install-deps"], check=True)
         return True
     except Exception as e:
-        st.error(f"Error installing browser: {e}")
+        st.error(f"Gagal menginstal engine browser: {e}")
         return False
 
-# Jalankan instalasi saat pertama kali buka website
-if 'browser_installed' not in st.session_state:
-    with st.spinner("📦 Menyiapkan mesin browser (ini hanya sekali)..."):
+# Jalankan instalasi otomatis di awal
+if 'browser_ready' not in st.session_state:
+    with st.spinner("🚀 Menyiapkan Engine Browser (Hanya dilakukan sekali)..."):
         if install_playwright():
-            st.session_state.browser_installed = True
+            st.session_state.browser_ready = True
+        else:
+            st.stop() # Hentikan jika instalasi gagal total
 
-# 2. Konfigurasi UI Dashboard
-st.set_page_config(page_title="Bulk Gmail Checker", layout="wide")
+# --- KONFIGURASI DASHBOARD UI ---
+st.set_page_config(page_title="Ultra Bulk Gmail Checker", layout="wide")
+
+# Custom CSS untuk tampilan Dashboard
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #eee; }
+    </style>
+""", unsafe_allow_html=True)
 
 st.title("🛡️ Google Bulk Email Checker")
-st.write("Cek status email massal (Live, Verif, Unreg, Disabled) tanpa login.")
+st.caption("Validasi status email massal (Live, Verif, Unreg, Disabled) tanpa perlu login.")
 
-# Inisialisasi data di memori
-if 'results_list' not in st.session_state:
-    st.session_state.results_list = []
-if 'stats' not in st.session_state:
-    st.session_state.stats = {"ALL": 0, "Live": 0, "Verif": 0, "Disabled": 0, "Unregistered": 0}
+# Inisialisasi State Data
+if 'results_data' not in st.session_state:
+    st.session_state.results_data = []
+if 'counts' not in st.session_state:
+    st.session_state.counts = {"ALL": 0, "Live": 0, "Verif": 0, "Disabled": 0, "Unregistered": 0}
 
-# --- Tampilan Statistik ---
-cols = st.columns(5)
-cols[0].metric("ALL", st.session_state.stats["ALL"])
-cols[1].metric("LIVE", st.session_state.stats["Live"])
-cols[2].metric("VERIF", st.session_state.stats["Verif"])
-cols[3].metric("DISABLED", st.session_state.stats["Disabled"])
-cols[4].metric("UNREG", st.session_state.stats["Unregistered"])
+# --- BAGIAN STATISTIK ---
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("TOTAL", st.session_state.counts["ALL"])
+m2.metric("LIVE ✅", st.session_state.counts["Live"])
+m3.metric("VERIF 🔑", st.session_state.counts["Verif"])
+m4.metric("DISABLED 🚫", st.session_state.counts["Disabled"])
+m5.metric("UNREG ❓", st.session_state.counts["Unregistered"])
 
-# Input List Email
-email_input = st.text_area("Masukkan Email (per baris):", height=150, placeholder="email@gmail.com")
-col1, col2 = st.columns([1, 5])
-btn_run = col1.button("🚀 MULAI")
-btn_clear = col2.button("🧹 BERSIHKAN")
+# --- INPUT AREA ---
+email_input = st.text_area("Masukkan Daftar Email (Satu per baris):", height=200, placeholder="contoh@gmail.com\nuser123@gmail.com")
 
-if btn_clear:
-    st.session_state.results_list = []
-    st.session_state.stats = {k: 0 for k in st.session_state.stats}
+col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 4])
+start_exec = col_btn1.button("🚀 MULAI CEK", use_container_width=True)
+clear_data = col_btn2.button("🧹 CLEAR", use_container_width=True)
+
+if clear_data:
+    st.session_state.results_data = []
+    st.session_state.counts = {k: 0 for k in st.session_state.counts}
     st.rerun()
 
-# 3. Logika Utama Pengecekan
-async def check_email(email):
+# --- LOGIKA PENGECEKAN (ASYNC) ---
+async def check_gmail_status(email):
     async with async_playwright() as p:
-        # Launch browser dengan mode headless (tanpa tampilan)
+        # Jalankan browser tanpa GUI
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+        page = await context.new_page()
+        
         try:
-            # Gunakan Recovery Endpoint
+            # Gunakan endpoint recovery Google (Tanpa Password)
             await page.goto('https://accounts.google.com/signin/v2/recoveryidentifier', timeout=60000)
             await page.fill('input[type="email"]', email)
             await page.click('#recoveryIdentifierNext')
-            await asyncio.sleep(3) # Jeda agar tidak dianggap robot
+            
+            # Tunggu respon visual dari Google
+            await asyncio.sleep(3) 
             
             content = await page.content()
+            
             if "Gagal menemukan" in content or "Couldn't find" in content:
                 return "Unregistered"
             elif "dinonaktifkan" in content or "disabled" in content:
@@ -72,33 +93,51 @@ async def check_email(email):
             elif "verifikasi" in content or "verification" in content or "otp" in content.lower():
                 return "Verif"
             else:
+                # Jika tidak ada indikasi error, berarti akun "Live" (ada)
                 return "Live"
-        except Exception:
-            return "Error"
+        except:
+            return "Error/Timeout"
         finally:
             await browser.close()
 
-# 4. Eksekusi saat Tombol Mulai diklik
-if btn_run and email_input:
-    emails = [e.strip() for e in email_input.split('\n') if e.strip()]
-    st.session_state.stats["ALL"] = len(emails)
+# --- EKSEKUSI ---
+if start_exec and email_input:
+    list_email = [e.strip() for e in email_input.split('\n') if e.strip()]
+    st.session_state.counts["ALL"] = len(list_email)
     
-    status_bar = st.progress(0)
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
-    for i, mail in enumerate(emails):
-        status = asyncio.run(check_email(mail))
+    for i, mail in enumerate(list_email):
+        status_text.text(f"⏳ Sedang mengecek: {mail}...")
+        res = asyncio.run(check_gmail_status(mail))
         
-        # Update statistik & hasil
-        st.session_state.stats[status] = st.session_state.stats.get(status, 0) + 1
-        st.session_state.results_list.insert(0, {"Email": mail, "Status": status})
+        # Update Data & Statistik
+        st.session_state.counts[res] = st.session_state.counts.get(res, 0) + 1
+        st.session_state.results_data.insert(0, {"Email": mail, "Status": res})
         
-        # Update UI secara visual
-        status_bar.progress((i + 1) / len(emails))
-        
+        # Update Progress
+        progress_bar.progress((i + 1) / len(list_email))
+    
+    status_text.success("✅ Pengecekan Selesai!")
     st.rerun()
 
-# Tampilkan Tabel Hasil
-if st.session_state.results_list:
-    st.write("---")
-    st.write("### 📋 Detail Hasil")
-    st.table(st.session_state.results_list)
+# --- TABEL HASIL & DOWNLOAD ---
+if st.session_state.results_data:
+    st.divider()
+    df = pd.DataFrame(st.session_state.results_data)
+    
+    col_dl1, col_dl2 = st.columns([4, 1])
+    col_dl1.subheader("📋 Laporan Hasil")
+    
+    # Fitur Download CSV
+    csv = df.to_csv(index=False).encode('utf-8')
+    col_dl2.download_button(
+        label="📥 DOWNLOAD CSV",
+        data=csv,
+        file_name="hasil_cek_email.csv",
+        mime="text/csv",
+    )
+    
+    # Tampilkan Tabel dengan Warna Status
+    st.dataframe(df, use_container_width=True)
