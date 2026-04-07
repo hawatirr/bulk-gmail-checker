@@ -3,157 +3,174 @@ import requests
 import pandas as pd
 import time
 
-# --- 1. CONFIG & STYLING (ELEGANT & RESPONSIVE) ---
+# --- 1. CONFIG & THEME (ULTRA DARK ELEGANT) ---
 st.set_page_config(page_title="Gmail Bulk Checker Pro", layout="wide", page_icon="🛡️")
 
-# Custom CSS untuk tampilan elegan dan tombol copy
+# Masukkan Token Anda di sini agar otomatis terisi saat aplikasi dibuka
+DEFAULT_TOKEN = "3e9686be5343361007b21f6639af101dd505687dd79ea1c63ab84a300dc32dba"
+
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&family=Roboto+Mono&display=swap');
     
+    /* Global Styles */
     .main { background-color: #0d1117; color: #f0f0f0; }
-    .stMetric { background-color: #161b22; padding: 20px; border-radius: 12px; border: 1px solid #30363d; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-    .result-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; transition: 0.3s; }
-    .result-card:hover { border-color: #ff4500; background: #1c2128; }
+    h1, h2, h3 { font-family: 'Orbitron', sans-serif; letter-spacing: 2px; }
     
-    /* Status Colors */
-    .status-live { color: #00FF7F; font-weight: bold; }
-    .status-verify { color: #FFD700; font-weight: bold; }
-    .status-disabled { color: #FF6347; font-weight: bold; }
-    .status-unreg { color: #00CCFF; font-weight: bold; }
-    .status-bad { color: #E600AC; font-weight: bold; }
+    /* Metric Box */
+    div[data-testid="stMetric"] {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        padding: 15px !important;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+
+    /* Input Area Styling */
+    .stTextArea textarea {
+        font-family: 'Roboto Mono', monospace;
+        background-color: #0d1117 !important;
+        color: #58a6ff !important;
+        border: 1px solid #30363d !important;
+    }
+
+    /* Button Styling */
+    .stButton button {
+        border-radius: 8px;
+        font-family: 'Orbitron';
+        font-weight: bold;
+        transition: 0.3s;
+    }
     
-    /* Copy Button Style */
-    .copy-btn { background: #ff4500; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: 'Orbitron'; }
-    .copy-btn:active { transform: scale(0.95); }
+    /* Result Header Styling */
+    .tab-header { font-size: 1.2rem; font-weight: bold; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. SESSION STATE ---
-if 'results' not in st.session_state:
-    st.session_state.results = []
-if 'stats' not in st.session_state:
-    st.session_state.stats = {"live": 0, "verify": 0, "disabled": 0, "unregistered": 0, "bad": 0}
+# --- 2. SESSION STATE (STATE MANAGEMENT) ---
+if 'check_results' not in st.session_state:
+    st.session_state.check_results = {
+        "live": [], "verify": [], "disabled": [], "unregistered": [], "bad": []
+    }
 
 # --- 3. HELPER FUNCTIONS ---
-def auto_fix_email(email_str):
-    """Mendeteksi dan memperbaiki email jika tanpa @gmail.com"""
-    email = email_str.strip().lower()
-    if not email: return None
-    if "@" not in email:
-        return f"{email}@gmail.com"
-    return email
+def process_emails(text):
+    """Auto Detect & Auto Fix Email Format"""
+    raw_list = text.replace(",", "\n").split("\n")
+    processed = []
+    for item in raw_list:
+        clean = item.strip().lower()
+        if clean:
+            if "@" not in clean:
+                processed.append(f"{clean}@gmail.com")
+            else:
+                processed.append(clean)
+    return processed
 
-def call_checker_api(emails, token):
+def call_mbahbabat_api(emails, token):
     url = "https://gmail-validation.mbahbabat.workers.dev/check1"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    payload = {"mail": emails}
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, json={"mail": emails}, timeout=60)
         return response.json() if response.status_code == 200 else None
     except:
         return None
 
-# --- 4. SIDEBAR & HEADER ---
-with st.sidebar:
-    st.title("🔑 SETTINGS")
-    api_token = st.text_input("API Bearer Token:", type="password", placeholder="Paste your token here...")
-    st.markdown("[Dapatkan Token Di Sini](https://mbahbabat.github.io/bulk-gmail-checker/id/execute/)")
-    st.divider()
-    st.caption("v1.0 - Powered by Mbahbabat API")
+# --- 4. HEADER SECTION ---
+st.markdown("<h1 style='text-align: center; color: #ff4500;'>🛡️ GMAIL BULK CHECKER V5</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #8b949e;'>High-Speed Validation Engine Powered by Mbahbabat API</p>", unsafe_allow_html=True)
 
-st.title("🛡️ BULK GMAIL CHECKER PRO")
-st.write("Cek status akun Google massal dengan kecepatan tinggi dan hasil akurat.")
+# --- 5. INPUT & CONTROL SECTION (ATAS) ---
+with st.container():
+    col_input, col_token = st.columns([3, 1])
+    
+    with col_token:
+        token = st.text_input("🔑 API TOKEN", value=DEFAULT_TOKEN, type="password")
+        st.caption("[Ambil Token Disini](https://mbahbabat.github.io/bulk-gmail-checker/id/api-docs/)")
+        
+    with col_input:
+        # Fitur Paste & Input Area
+        email_input = st.text_area("📧 LIST EMAIL (Otomatis deteksi @gmail.com)", 
+                                   height=180, 
+                                   placeholder="Contoh:\nuser1\nuser2@gmail.com\nuser3, user4")
 
-# --- 5. DASHBOARD STATS (LIVE) ---
-stat_cols = st.columns(5)
-metrics = {
-    "live": stat_cols[0].empty(),
-    "verify": stat_cols[1].empty(),
-    "disabled": stat_cols[2].empty(),
-    "unregistered": stat_cols[3].empty(),
-    "bad": stat_cols[4].empty()
-}
+    # Control Buttons
+    c1, c2, c3 = st.columns([1, 1, 3])
+    btn_start = c1.button("🚀 EXECUTE CHECK", type="primary", use_container_width=True)
+    
+    if c2.button("🧹 CLEAR INPUT", use_container_width=True):
+        st.session_state.check_results = {k: [] for k in st.session_state.check_results}
+        st.rerun()
 
-def update_metrics():
-    for key in metrics:
-        color_label = key.upper()
-        metrics[key].metric(label=color_label, value=st.session_state.stats[key])
-
-update_metrics()
-
-# --- 6. INPUT AREA ---
-email_input = st.text_area("Masukkan Email (per baris atau pisahkan dengan koma):", height=150, placeholder="user1\nuser2@gmail.com\nuser3")
-
-col_start, col_clear, _ = st.columns([1.5, 1.5, 5])
-btn_run = col_start.button("🚀 EXECUTE CHECK", use_container_width=True)
-if col_clear.button("🧹 CLEAR ALL", use_container_width=True):
-    st.session_state.results = []
-    st.session_state.stats = {k: 0 for k in st.session_state.stats}
-    st.rerun()
-
-# Container untuk Live Result
-live_result_container = st.container()
-
-# --- 7. MAIN LOGIC ---
-if btn_run:
-    if not api_token:
-        st.error("❌ Silakan masukkan API Token di sidebar!")
+# --- 6. LOGIKA UTAMA (LIVE RESULT) ---
+if btn_start:
+    if not token or token == "MASUKKAN_TOKEN_ANDA_DISINI":
+        st.error("❌ Token API belum diisi!")
     elif not email_input:
-        st.warning("⚠️ Masukkan daftar email terlebih dahulu!")
+        st.warning("⚠️ List email masih kosong!")
     else:
-        # 1. Parsing & Auto-Fixing
-        raw_emails = email_input.replace(",", "\n").split("\n")
-        clean_emails = []
-        for e in raw_emails:
-            fixed = auto_fix_email(e)
-            if fixed: clean_emails.append(fixed)
+        # 1. Parsing & Fix
+        emails_to_check = process_emails(email_input)
         
-        # 2. Chunking (API Limit 100 per request)
-        chunk_size = 100
-        chunks = [clean_emails[i:i + chunk_size] for i in range(0, len(clean_emails), chunk_size)]
+        # 2. Reset Results
+        st.session_state.check_results = {k: [] for k in st.session_state.check_results}
         
+        # 3. Progress Bar
         progress_bar = st.progress(0)
+        status_text = st.empty()
         
-        for idx, chunk in enumerate(chunks):
-            api_results = call_checker_api(chunk, api_token)
+        # 4. Chunking (API Limit 100 per req)
+        chunks = [emails_to_check[i:i + 100] for i in range(0, len(emails_to_check), 100)]
+        
+        for i, chunk in enumerate(chunks):
+            status_text.text(f"⏳ Mengecek Batch {i+1}/{len(chunks)}...")
+            api_data = call_mbahbabat_api(chunk, token)
             
-            if api_results:
-                for item in api_results:
-                    email = item['email']
-                    status = item['status'].lower()
-                    
-                    # Update Stats
-                    if status in st.session_state.stats:
-                        st.session_state.stats[status] += 1
-                    
-                    # Store Result
-                    res_entry = {"email": email, "status": status}
-                    st.session_state.results.insert(0, res_entry)
-                    
-                    # LIVE RESULT DISPLAY (Elegant Card with Copy Button)
-                    with live_result_container:
-                        status_class = f"status-{status}"
-                        st.markdown(f"""
-                            <div class="result-card">
-                                <div>
-                                    <span style="font-family: 'Roboto Mono';">{email}</span>
-                                    <span class="{status_class}" style="margin-left: 15px;">[{status.upper()}]</span>
-                                </div>
-                                <button class="copy-btn" onclick="navigator.clipboard.writeText('{email}')">COPY</button>
-                            </div>
-                        """, unsafe_allow_html=True)
-                
-                update_metrics()
+            if api_data:
+                for item in api_data:
+                    stat = item['status'].lower()
+                    mail = item['email']
+                    if stat in st.session_state.check_results:
+                        st.session_state.check_results[stat].append(mail)
             
-            progress = (idx + 1) / len(chunks)
-            progress_bar.progress(progress)
-            
-        st.success(f"✅ Selesai! {len(clean_emails)} email telah diperiksa.")
+            progress_bar.progress((i + 1) / len(chunks))
+        
+        status_text.success("✅ Pengecekan Selesai!")
 
-# Tombol Download di Akhir
-if st.session_state.results:
-    st.divider()
-    df = pd.DataFrame(st.session_state.results)
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 DOWNLOAD CSV REPORT", data=csv, file_name="gmail_check_results.csv", mime="text/csv")
+# --- 7. DASHBOARD METRICS ---
+st.divider()
+m = st.columns(5)
+m[0].metric("LIVE", len(st.session_state.check_results["live"]))
+m[1].metric("VERIFY", len(st.session_state.check_results["verify"]))
+m[2].metric("DISABLED", len(st.session_state.check_results["disabled"]))
+m[3].metric("UNREG", len(st.session_state.check_results["unregistered"]))
+m[4].metric("BAD", len(st.session_state.check_results["bad"]))
+
+# --- 8. RESULT CENTER (TAB & COPY FEATURE) ---
+st.markdown("### 📋 RESULT CENTER")
+st.caption("Gunakan ikon di pojok kanan kotak teks untuk menyalin (copy) semua email dalam kategori tersebut.")
+
+# Membuat Tabs untuk hasil yang terpisah
+tabs = st.tabs(["✅ LIVE", "🔑 VERIFY", "🚫 DISABLED", "❓ UNREG", "⚠️ BAD"])
+
+def render_tab(tab_obj, key, color_hex):
+    with tab_obj:
+        data = st.session_state.check_results[key]
+        if data:
+            email_text = "\n".join(data)
+            # Tampilan data dalam box kode (ada fitur COPY bawaan Streamlit)
+            st.code(email_text, language="text")
+            
+            # Tombol download file
+            st.download_button(f"📥 Download {key.upper()}", email_text, file_name=f"{key}_results.txt")
+        else:
+            st.info(f"Belum ada data untuk kategori {key.upper()}")
+
+render_tab(tabs[0], "live", "#00FF7F")
+render_tab(tabs[1], "verify", "#FFD700")
+render_tab(tabs[2], "disabled", "#FF6347")
+render_tab(tabs[3], "unregistered", "#00CCFF")
+render_tab(tabs[4], "bad", "#E600AC")
+
+# --- FOOTER ---
+st.markdown("<br><hr><center>© 2024 Bulk Checker Pro | Elegant & Fast Interface</center>", unsafe_allow_html=True)
